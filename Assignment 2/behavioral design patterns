@@ -1,0 +1,1178 @@
+Behavioral Design Patterns
+Order Management System — Spring Boot Implementation
+Assignment 2: Chain of Responsibility • Command • Observer • Strategy
+ 
+Behavioral Design Patterns — Order Management System
+
+Assignment 2 implementation, built directly on top of the starter template
+from DianaScurtu/design_patterns.
+All TODOs from the template are filled in, and the project is refactored
+into a Spring Boot layered architecture with H2 persistence, per the
+assignment's exercise instructions.
+
+Patterns implemented
+
+Pattern	Where	Role in this system
+Chain of Responsibility	handler/	OrderValidationHandler (abstract) → InventoryCheckHandler → PaymentValidationHandler. Each order runs through this chain before it can be placed.
+Command	command/	OrderCommand / PlaceOrderCommand encapsulates "place this order" as an object, executed by OrderService.
+Observer	notification/	NotificationService (subject) notifies every registered Observer (EmailNotification, SmsNotification) when an order is placed or its status changes.
+Strategy	payment/	PaymentStrategy / CreditCardPayment / PayPalPayment, selected at runtime via PaymentStrategyFactory based on the order's paymentMethod.
+
+
+OrderService (service/OrderService.java) is where all four meet: it
+runs the validation chain, resolves and invokes a payment strategy,
+executes the place-order command, and notifies observers — all without
+depending on any single concrete handler, strategy, or observer.
+
+Layered architecture
+
+controller/   OrderController        — @RestController, REST endpoints
+service/      OrderService           — @Service, business logic + pattern orchestration
+repository/   OrderRepository        — Spring Data JPA, backed by H2
+entity/       Order                  — @Entity
+dto/          OrderDto, StatusUpdateRequest
+utils/        OrderMapper            — entity <-> DTO conversion
+handler/      Chain of Responsibility classes
+command/      Command pattern classes
+notification/ Observer pattern classes
+payment/      Strategy pattern classes
+exception/    OrderValidationException, GlobalExceptionHandler (@RestControllerAdvice)
+
+
+REST API
+
+Method	Path	Description
+POST	/api/orders	Place a new order (runs validation → payment → command → notification)
+GET	/api/orders	List all orders
+GET	/api/orders/{id}	Get one order
+PUT	/api/orders/{id}/status	Update an order's status (e.g. SHIPPED, CANCELLED)
+DELETE	/api/orders/{id}	Delete an order
+
+
+Example request body for POST /api/orders:
+
+{
+  "customerName": "Ada Lovelace",
+  "totalAmount": 249.99,
+  "paymentMethod": "CREDIT_CARD"
+}
+
+
+A rejected order (e.g. "paymentMethod": "BITCOIN") returns
+400 Bad Request with a JSON error body, via GlobalExceptionHandler.
+
+Swagger UI is available at /swagger once the app is running; the H2
+console is at /h2-console (JDBC URL jdbc:h2:mem:orderdb, user sa,
+password password, per application.properties).
+
+Logging
+
+All System.out.println calls from the original template are replaced
+with @Slf4j-backed logging (log.info(...), log.warn(...)), per the
+assignment's logging instruction.
+
+How to build and run
+
+Requires JDK 17+ and Maven with normal internet access (this project
+pulls Spring Boot, Spring Data JPA, H2, Lombok, and springdoc-openapi
+from Maven Central).
+
+mvn spring-boot:run
+
+
+Run the tests:
+
+mvn test
+
+
+Note on this delivery: the sandbox this project was assembled in has no route to Maven Central, so mvn could not be run here to compile/test it end-to-end. Every file was checked by hand instead — package declarations match their directory paths, all internal org.example.behavioral.* imports resolve to an existing class, class/ interface names match their filenames, and braces balance in every file (28/28 pass all four checks). Build it locally with the command above to get a full Maven-verified compile and test run.
+
+Test coverage
+
+src/test/java includes JUnit 5 (+ Mockito) tests for:
+●	The full Chain of Responsibility (valid orders, inventory rejection,
+  payment rejection, unsupported payment method, single-handler chain)
+●	PaymentStrategyFactory (all supported/unsupported methods, case
+  insensitivity, null handling)
+●	NotificationService (registered observers notified, dynamically
+  added observers, empty observer list)
+●	PlaceOrderCommand (status transition on execute)
+●	OrderService (full placeOrder happy path with mocked repository/
+  notification service, rejection path, status update, not-found paths
+  for get/update/delete)
+
+Publishing to GitHub
+
+The assignment requires a link to a public GitHub repository, and
+the grading deadline is tied to the last commit timestamp — commit only
+once the work is final.
+
+cd behavioral_design_patterns
+git init
+git add .
+git commit -m "Implement behavioral design patterns in a Spring Boot order management system"
+git branch -M main
+git remote add origin https://github.com/<your-username>/behavioral-design-patterns.git
+git push -u origin main
+
+
+Then set the repository visibility to Public (Settings → General →
+Danger Zone → Change visibility) before submitting the link.
+
+ 
+Main Source Code
+pom.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+ 
+    <groupId>com.example</groupId>
+    <artifactId>behavioral_design_patterns</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+ 
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.2</version>
+        <relativePath/>
+    </parent>
+ 
+    <properties>
+        <java.version>17</java.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+ 
+    <dependencies>
+        <!-- Spring Boot Starter dependencies -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+ 
+        <!-- API documentation -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.6.0</version>
+        </dependency>
+ 
+        <!-- H2 Database -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+ 
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>1.18.24</version>
+            <scope>provided</scope>
+        </dependency>
+ 
+        <!-- Testing -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+ 
+    <build>
+        <plugins>
+            <!-- Spring Boot Maven Plugin -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+ 
+</project>
+src/main/resources/application.properties
+# H2 Database Configuration
+spring.datasource.url=jdbc:h2:mem:orderdb;DB_CLOSE_DELAY=-1
+spring.datasource.driverClassName=org.h2.Driver
+spring.datasource.username=sa
+spring.datasource.password=password
+ 
+# Enable the H2 Console
+spring.h2.console.enabled=true
+spring.h2.console.path=/h2-console
+ 
+# JPA settings
+spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
+# Values:
+# none - Disable DDL handling.
+# validate - Validate the schema, make no changes to the database.
+# update - Update the schema if necessary.
+# create - Create the schema and destroy previous data.
+# create-drop - Create and then destroy the schema at the end of the session.
+spring.jpa.hibernate.ddl-auto=update
+ 
+# Swagger / OpenAPI UI
+springdoc.swagger-ui.enabled=true
+springdoc.swagger-ui.path=/swagger
+springdoc.swagger-ui.tags-sorter=alpha
+ 
+# Logging
+logging.level.org.example.behavioral=DEBUG
+src/main/java/org/example/behavioral/OrderManagementApplication.java
+package org.example.behavioral;
+ 
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+ 
+@SpringBootApplication
+public class OrderManagementApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(OrderManagementApplication.class, args);
+    }
+}
+src/main/java/org/example/behavioral/entity/Order.java
+package org.example.behavioral.entity;
+ 
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+ 
+@Entity
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Slf4j
+public class Order {
+ 
+    public static final String STATUS_PENDING = "PENDING";
+    public static final String STATUS_PLACED = "PLACED";
+    public static final String STATUS_REJECTED = "REJECTED";
+    public static final String STATUS_CANCELLED = "CANCELLED";
+    public static final String STATUS_SHIPPED = "SHIPPED";
+ 
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+ 
+    private String customerName;
+    private String status;
+    private double totalAmount;
+ 
+    /** e.g. "CREDIT_CARD" or "PAYPAL" — selects the Strategy used at checkout. */
+    private String paymentMethod;
+ 
+    public void updateStatus(String newStatus) {
+        this.status = newStatus;
+        log.info("Order {} status updated to: {}", id, newStatus);
+    }
+}
+src/main/java/org/example/behavioral/dto/OrderDto.java
+package org.example.behavioral.dto;
+ 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
+import lombok.Data;
+ 
+@Data
+public class OrderDto {
+    private Long id;
+ 
+    @NotBlank(message = "customerName is required")
+    private String customerName;
+ 
+    private String status;
+ 
+    @Positive(message = "totalAmount must be greater than zero")
+    private double totalAmount;
+ 
+    @NotBlank(message = "paymentMethod is required")
+    private String paymentMethod;
+}
+src/main/java/org/example/behavioral/dto/StatusUpdateRequest.java
+package org.example.behavioral.dto;
+ 
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+ 
+@Data
+public class StatusUpdateRequest {
+    @NotBlank(message = "status is required")
+    private String status;
+}
+src/main/java/org/example/behavioral/repository/OrderRepository.java
+package org.example.behavioral.repository;
+ 
+import org.example.behavioral.entity.Order;
+import org.springframework.data.jpa.repository.JpaRepository;
+ 
+public interface OrderRepository extends JpaRepository<Order, Long> {
+    // Additional query methods can be defined here if needed
+}
+src/main/java/org/example/behavioral/utils/OrderMapper.java
+package org.example.behavioral.utils;
+ 
+import org.example.behavioral.dto.OrderDto;
+import org.example.behavioral.entity.Order;
+ 
+public class OrderMapper {
+ 
+    public static OrderDto toDto(Order order) {
+        OrderDto dto = new OrderDto();
+        dto.setId(order.getId());
+        dto.setCustomerName(order.getCustomerName());
+        dto.setStatus(order.getStatus());
+        dto.setTotalAmount(order.getTotalAmount());
+        dto.setPaymentMethod(order.getPaymentMethod());
+        return dto;
+    }
+ 
+    public static Order toEntity(OrderDto dto) {
+        Order order = new Order();
+        order.setCustomerName(dto.getCustomerName());
+        order.setTotalAmount(dto.getTotalAmount());
+        order.setPaymentMethod(dto.getPaymentMethod());
+        order.setStatus(Order.STATUS_PENDING);
+        return order;
+    }
+}
+src/main/java/org/example/behavioral/handler/OrderValidationHandler.java
+package org.example.behavioral.handler;
+ 
+import org.example.behavioral.entity.Order;
+ 
+/**
+ * Chain of Responsibility Pattern
+ * -------------------------------
+ * Each concrete handler decides whether it can (and should) validate part
+ * of the order, and either raises a rejection or forwards the request to
+ * the next handler in the chain. OrderService only ever talks to the head
+ * of the chain -- it doesn't know how many handlers there are or in what
+ * order they run, so handlers can be added, removed, or reordered without
+ * touching the service.
+ */
+public abstract class OrderValidationHandler {
+    protected OrderValidationHandler next;
+ 
+    public OrderValidationHandler setNext(OrderValidationHandler next) {
+        this.next = next;
+        return next;
+    }
+ 
+    public void validate(Order order) {
+        if (next != null) {
+            next.validate(order);
+        }
+    }
+}
+src/main/java/org/example/behavioral/handler/InventoryCheckHandler.java
+package org.example.behavioral.handler;
+ 
+import lombok.extern.slf4j.Slf4j;
+import org.example.behavioral.entity.Order;
+import org.example.behavioral.exception.OrderValidationException;
+ 
+/**
+ * Concrete handler: checks that the order is fulfillable from stock.
+ *
+ * This module has no dedicated inventory table (out of scope for this
+ * assignment), so stock is simulated with a simple per-order cap that
+ * stands in for "insufficient inventory for this quantity/value". Swap
+ * this method's body for a real repository lookup (e.g. an
+ * InventoryRepository keyed by SKU) without touching any other handler
+ * or the chain itself -- that's the point of the pattern.
+ */
+@Slf4j
+public class InventoryCheckHandler extends OrderValidationHandler {
+ 
+    private static final double MAX_SINGLE_ORDER_VALUE = 10_000.0;
+ 
+    @Override
+    public void validate(Order order) {
+        if (order.getTotalAmount() > MAX_SINGLE_ORDER_VALUE) {
+            log.warn("Inventory check failed for order from {}: amount {} exceeds available stock capacity {}",
+                    order.getCustomerName(), order.getTotalAmount(), MAX_SINGLE_ORDER_VALUE);
+            throw new OrderValidationException(
+                    "Insufficient inventory to fulfill an order of this size.");
+        }
+        log.info("Inventory check passed for order from {}.", order.getCustomerName());
+        super.validate(order);
+    }
+}
+src/main/java/org/example/behavioral/handler/PaymentValidationHandler.java
+package org.example.behavioral.handler;
+ 
+import lombok.extern.slf4j.Slf4j;
+import org.example.behavioral.entity.Order;
+import org.example.behavioral.exception.OrderValidationException;
+import org.example.behavioral.payment.PaymentStrategyFactory;
+ 
+/**
+ * Concrete handler: validates the payment details before the order is
+ * allowed to proceed to placement. Delegates the "is this a supported
+ * payment method" question to PaymentStrategyFactory so the set of valid
+ * methods is defined in exactly one place (the Strategy registry).
+ */
+@Slf4j
+public class PaymentValidationHandler extends OrderValidationHandler {
+ 
+    @Override
+    public void validate(Order order) {
+        if (order.getTotalAmount() <= 0) {
+            log.warn("Payment validation failed for order from {}: non-positive amount {}",
+                    order.getCustomerName(), order.getTotalAmount());
+            throw new OrderValidationException("Order total must be greater than zero.");
+        }
+        if (!PaymentStrategyFactory.isSupported(order.getPaymentMethod())) {
+            log.warn("Payment validation failed for order from {}: unsupported payment method '{}'",
+                    order.getCustomerName(), order.getPaymentMethod());
+            throw new OrderValidationException(
+                    "Unsupported payment method: " + order.getPaymentMethod());
+        }
+        log.info("Payment validation passed for order from {}.", order.getCustomerName());
+        super.validate(order);
+    }
+}
+src/main/java/org/example/behavioral/payment/PaymentStrategy.java
+package org.example.behavioral.payment;
+ 
+/**
+ * Strategy Pattern
+ * ----------------
+ * Encapsulates each payment method as an interchangeable algorithm behind
+ * one interface. OrderService depends only on PaymentStrategy -- it never
+ * references CreditCardPayment or PayPalPayment directly -- so a new
+ * payment method can be added by writing one new class and registering it
+ * in PaymentStrategyFactory, with no change to OrderService.
+ */
+public interface PaymentStrategy {
+    void pay(double amount);
+}
+src/main/java/org/example/behavioral/payment/CreditCardPayment.java
+package org.example.behavioral.payment;
+ 
+import lombok.extern.slf4j.Slf4j;
+ 
+@Slf4j
+public class CreditCardPayment implements PaymentStrategy {
+    @Override
+    public void pay(double amount) {
+        log.info("Paid ${} with Credit Card.", amount);
+    }
+}
+src/main/java/org/example/behavioral/payment/PayPalPayment.java
+package org.example.behavioral.payment;
+ 
+import lombok.extern.slf4j.Slf4j;
+ 
+@Slf4j
+public class PayPalPayment implements PaymentStrategy {
+    @Override
+    public void pay(double amount) {
+        log.info("Paid ${} with PayPal.", amount);
+    }
+}
+src/main/java/org/example/behavioral/payment/PaymentStrategyFactory.java
+package org.example.behavioral.payment;
+ 
+import java.util.Locale;
+import java.util.Set;
+ 
+/**
+ * Selects the concrete PaymentStrategy for a given payment method string.
+ * This is where "which methods exist" is defined in one place, so both
+ * OrderService (to actually charge the customer) and
+ * PaymentValidationHandler (to check the method is supported) can rely on
+ * it instead of duplicating a list of valid methods.
+ */
+public class PaymentStrategyFactory {
+ 
+    private static final Set<String> SUPPORTED_METHODS = Set.of("CREDIT_CARD", "PAYPAL");
+ 
+    private PaymentStrategyFactory() {
+    }
+ 
+    public static boolean isSupported(String paymentMethod) {
+        return paymentMethod != null && SUPPORTED_METHODS.contains(paymentMethod.toUpperCase(Locale.ROOT));
+    }
+ 
+    public static PaymentStrategy get(String paymentMethod) {
+        if (paymentMethod == null) {
+            throw new IllegalArgumentException("paymentMethod must not be null");
+        }
+        return switch (paymentMethod.toUpperCase(Locale.ROOT)) {
+            case "CREDIT_CARD" -> new CreditCardPayment();
+            case "PAYPAL" -> new PayPalPayment();
+            default -> throw new IllegalArgumentException("Unsupported payment method: " + paymentMethod);
+        };
+    }
+}
+src/main/java/org/example/behavioral/command/OrderCommand.java
+package org.example.behavioral.command;
+ 
+/**
+ * Command Pattern
+ * ---------------
+ * Encapsulates an order action as an object. OrderService triggers
+ * commands without knowing the details of what "placing" (or, with a
+ * future CancelOrderCommand, "cancelling") actually involves -- that
+ * logic lives entirely inside the command itself.
+ */
+public interface OrderCommand {
+    void execute();
+}
+src/main/java/org/example/behavioral/command/PlaceOrderCommand.java
+package org.example.behavioral.command;
+ 
+import lombok.extern.slf4j.Slf4j;
+import org.example.behavioral.entity.Order;
+ 
+@Slf4j
+public class PlaceOrderCommand implements OrderCommand {
+    private final Order order;
+ 
+    public PlaceOrderCommand(Order order) {
+        this.order = order;
+    }
+ 
+    @Override
+    public void execute() {
+        order.updateStatus(Order.STATUS_PLACED);
+        log.info("Order placed successfully: {}", order.getId());
+    }
+}
+src/main/java/org/example/behavioral/notification/Observer.java
+package org.example.behavioral.notification;
+ 
+/**
+ * Observer Pattern
+ * ----------------
+ * Lets any number of notification channels react to an order status
+ * change without NotificationService (the subject) knowing anything about
+ * how each channel actually delivers its message.
+ */
+public interface Observer {
+    void update(String message);
+}
+src/main/java/org/example/behavioral/notification/NotificationService.java
+package org.example.behavioral.notification;
+ 
+import org.springframework.stereotype.Service;
+ 
+import java.util.ArrayList;
+import java.util.List;
+ 
+/**
+ * Subject. Registered as a Spring bean so its list of observers can be
+ * populated automatically from every Observer bean in the context (see
+ * the constructor) -- adding a new notification channel is then just
+ * "write a class implementing Observer and annotate it @Component", with
+ * no change needed here or in OrderService.
+ */
+@Service
+public class NotificationService {
+    private final List<Observer> observers = new ArrayList<>();
+ 
+    public NotificationService(List<Observer> registeredObservers) {
+        this.observers.addAll(registeredObservers);
+    }
+ 
+    public void addObserver(Observer observer) {
+        observers.add(observer);
+    }
+ 
+    public void notifyObservers(String message) {
+        for (Observer observer : observers) {
+            observer.update(message);
+        }
+    }
+}
+src/main/java/org/example/behavioral/notification/EmailNotification.java
+package org.example.behavioral.notification;
+ 
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+ 
+@Slf4j
+@Component
+public class EmailNotification implements Observer {
+    @Override
+    public void update(String message) {
+        log.info("[Email] {}", message);
+    }
+}
+src/main/java/org/example/behavioral/notification/SmsNotification.java
+package org.example.behavioral.notification;
+ 
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+ 
+@Slf4j
+@Component
+public class SmsNotification implements Observer {
+    @Override
+    public void update(String message) {
+        log.info("[SMS] {}", message);
+    }
+}
+src/main/java/org/example/behavioral/service/OrderService.java
+package org.example.behavioral.service;
+ 
+import lombok.extern.slf4j.Slf4j;
+import org.example.behavioral.command.OrderCommand;
+import org.example.behavioral.command.PlaceOrderCommand;
+import org.example.behavioral.entity.Order;
+import org.example.behavioral.exception.OrderValidationException;
+import org.example.behavioral.handler.InventoryCheckHandler;
+import org.example.behavioral.handler.OrderValidationHandler;
+import org.example.behavioral.handler.PaymentValidationHandler;
+import org.example.behavioral.notification.NotificationService;
+import org.example.behavioral.payment.PaymentStrategy;
+import org.example.behavioral.payment.PaymentStrategyFactory;
+import org.example.behavioral.repository.OrderRepository;
+import org.springframework.stereotype.Service;
+ 
+import java.util.List;
+import java.util.NoSuchElementException;
+ 
+/**
+ * Business logic layer. This class is the one place where all four
+ * behavioral patterns meet:
+ *
+ *  - Chain of Responsibility: the order runs through a validation chain
+ *    (Inventory -> Payment) before it's allowed to proceed.
+ *  - Strategy: the customer's chosen payment method is charged via
+ *    whichever PaymentStrategy PaymentStrategyFactory returns.
+ *  - Command: placing the order itself is encapsulated as a
+ *    PlaceOrderCommand, executed rather than inlined here.
+ *  - Observer: once the order is placed or its status changes, every
+ *    registered notification channel is informed via NotificationService.
+ */
+@Slf4j
+@Service
+public class OrderService {
+ 
+    private final OrderRepository orderRepository;
+    private final NotificationService notificationService;
+ 
+    public OrderService(OrderRepository orderRepository, NotificationService notificationService) {
+        this.orderRepository = orderRepository;
+        this.notificationService = notificationService;
+    }
+ 
+    public Order placeOrder(Order order) {
+        log.info("Placing order for customer {} (amount={}, method={})",
+                order.getCustomerName(), order.getTotalAmount(), order.getPaymentMethod());
+ 
+        // 1. Chain of Responsibility: validate before doing anything else.
+        OrderValidationHandler chain = buildValidationChain();
+        try {
+            chain.validate(order);
+        } catch (OrderValidationException ex) {
+            log.warn("Order rejected for customer {}: {}", order.getCustomerName(), ex.getMessage());
+            order.setStatus(Order.STATUS_REJECTED);
+            throw ex;
+        }
+ 
+        // 2. Strategy: charge the customer using the requested payment method.
+        PaymentStrategy paymentStrategy = PaymentStrategyFactory.get(order.getPaymentMethod());
+        paymentStrategy.pay(order.getTotalAmount());
+ 
+        // Persist once up front so the command/notification steps have an id to reference.
+        Order saved = orderRepository.save(order);
+ 
+        // 3. Command: encapsulate the "place this order" action.
+        OrderCommand placeOrderCommand = new PlaceOrderCommand(saved);
+        placeOrderCommand.execute();
+        saved = orderRepository.save(saved);
+ 
+        // 4. Observer: notify every registered channel that the order was placed.
+        notificationService.notifyObservers(
+                "Order " + saved.getId() + " for " + saved.getCustomerName() + " has been placed.");
+ 
+        return saved;
+    }
+ 
+    public Order updateStatus(Long orderId, String newStatus) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found: " + orderId));
+        order.updateStatus(newStatus);
+        Order saved = orderRepository.save(order);
+ 
+        notificationService.notifyObservers(
+                "Order " + saved.getId() + " status changed to " + newStatus + ".");
+ 
+        return saved;
+    }
+ 
+    public List<Order> getAllOrders() {
+        return orderRepository.findAll();
+    }
+ 
+    public Order getOrderById(Long orderId) {
+        return orderRepository.findById(orderId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found: " + orderId));
+    }
+ 
+    public void deleteOrder(Long orderId) {
+        if (!orderRepository.existsById(orderId)) {
+            throw new NoSuchElementException("Order not found: " + orderId);
+        }
+        orderRepository.deleteById(orderId);
+    }
+ 
+    /**
+     * Assembles the Chain of Responsibility. This is the only place the
+     * chain's order (inventory before payment) is decided -- neither
+     * handler knows about the other.
+     */
+    private OrderValidationHandler buildValidationChain() {
+        OrderValidationHandler inventoryCheck = new InventoryCheckHandler();
+        OrderValidationHandler paymentValidation = new PaymentValidationHandler();
+        inventoryCheck.setNext(paymentValidation);
+        return inventoryCheck;
+    }
+}
+src/main/java/org/example/behavioral/controller/OrderController.java
+package org.example.behavioral.controller;
+ 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import jakarta.validation.Valid;
+import org.example.behavioral.dto.OrderDto;
+import org.example.behavioral.dto.StatusUpdateRequest;
+import org.example.behavioral.entity.Order;
+import org.example.behavioral.service.OrderService;
+import org.example.behavioral.utils.OrderMapper;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+ 
+import java.util.List;
+import java.util.stream.Collectors;
+ 
+@RestController
+@RequestMapping("/api/orders")
+public class OrderController {
+ 
+    private final OrderService orderService;
+ 
+    public OrderController(OrderService orderService) {
+        this.orderService = orderService;
+    }
+ 
+    @Operation(summary = "Place a new order",
+            description = "Validates, charges, and places a new order, then notifies subscribers")
+    @PostMapping
+    public ResponseEntity<OrderDto> placeOrder(@Valid @RequestBody OrderDto orderDto) {
+        Order order = OrderMapper.toEntity(orderDto);
+        Order placed = orderService.placeOrder(order);
+        return ResponseEntity.status(HttpStatus.CREATED).body(OrderMapper.toDto(placed));
+    }
+ 
+    @Operation(summary = "Retrieve all orders")
+    @GetMapping
+    public List<OrderDto> getAllOrders() {
+        return orderService.getAllOrders()
+                .stream()
+                .map(OrderMapper::toDto)
+                .collect(Collectors.toList());
+    }
+ 
+    @Operation(summary = "Get an order by ID")
+    @GetMapping("/{id}")
+    public OrderDto getOrderById(@Parameter(description = "ID of the order to retrieve") @PathVariable Long id) {
+        return OrderMapper.toDto(orderService.getOrderById(id));
+    }
+ 
+    @Operation(summary = "Update an order's status", description = "e.g. SHIPPED, CANCELLED")
+    @PutMapping("/{id}/status")
+    public OrderDto updateStatus(
+            @Parameter(description = "ID of the order to update") @PathVariable Long id,
+            @Valid @RequestBody StatusUpdateRequest request) {
+        return OrderMapper.toDto(orderService.updateStatus(id, request.getStatus()));
+    }
+ 
+    @Operation(summary = "Delete an order by ID")
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteOrder(
+            @Parameter(description = "ID of the order to delete") @PathVariable Long id) {
+        orderService.deleteOrder(id);
+        return ResponseEntity.noContent().build();
+    }
+}
+src/main/java/org/example/behavioral/exception/OrderValidationException.java
+package org.example.behavioral.exception;
+ 
+/** Raised by a handler in the validation chain when an order fails a check. */
+public class OrderValidationException extends RuntimeException {
+    public OrderValidationException(String message) {
+        super(message);
+    }
+}
+src/main/java/org/example/behavioral/exception/GlobalExceptionHandler.java
+package org.example.behavioral.exception;
+ 
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+ 
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.stream.Collectors;
+ 
+@Slf4j
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+ 
+    @ExceptionHandler(OrderValidationException.class)
+    public ResponseEntity<Map<String, String>> handleValidation(OrderValidationException ex) {
+        log.warn("Order validation failed: {}", ex.getMessage());
+        return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+    }
+ 
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, String>> handleBeanValidation(MethodArgumentNotValidException ex) {
+        String message = ex.getBindingResult().getFieldErrors().stream()
+                .map(e -> e.getField() + ": " + e.getDefaultMessage())
+                .collect(Collectors.joining("; "));
+        log.warn("Request validation failed: {}", message);
+        return ResponseEntity.badRequest().body(Map.of("error", message));
+    }
+ 
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, String>> handleIllegalArgument(IllegalArgumentException ex) {
+        log.warn("Bad request: {}", ex.getMessage());
+        return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+    }
+ 
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<Map<String, String>> handleNotFound(NoSuchElementException ex) {
+        log.warn("Not found: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+    }
+}
+ 
+Test Source Code
+src/test/java/org/example/behavioral/handler/OrderValidationChainTest.java
+package org.example.behavioral.handler;
+ 
+import org.example.behavioral.entity.Order;
+import org.example.behavioral.exception.OrderValidationException;
+import org.junit.jupiter.api.Test;
+ 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+ 
+class OrderValidationChainTest {
+ 
+    private OrderValidationHandler buildChain() {
+        OrderValidationHandler inventory = new InventoryCheckHandler();
+        OrderValidationHandler payment = new PaymentValidationHandler();
+        inventory.setNext(payment);
+        return inventory;
+    }
+ 
+    private Order validOrder() {
+        Order order = new Order();
+        order.setCustomerName("Alice");
+        order.setTotalAmount(150.0);
+        order.setPaymentMethod("CREDIT_CARD");
+        order.setStatus(Order.STATUS_PENDING);
+        return order;
+    }
+ 
+    @Test
+    void validOrderPassesTheWholeChain() {
+        assertDoesNotThrow(() -> buildChain().validate(validOrder()));
+    }
+ 
+    @Test
+    void orderExceedingInventoryCapacityIsRejectedByInventoryHandler() {
+        Order order = validOrder();
+        order.setTotalAmount(50_000.0);
+ 
+        assertThrows(OrderValidationException.class, () -> buildChain().validate(order));
+    }
+ 
+    @Test
+    void orderWithZeroAmountIsRejectedByPaymentHandler() {
+        Order order = validOrder();
+        order.setTotalAmount(0.0);
+ 
+        assertThrows(OrderValidationException.class, () -> buildChain().validate(order));
+    }
+ 
+    @Test
+    void orderWithUnsupportedPaymentMethodIsRejectedByPaymentHandler() {
+        Order order = validOrder();
+        order.setPaymentMethod("BITCOIN");
+ 
+        assertThrows(OrderValidationException.class, () -> buildChain().validate(order));
+    }
+ 
+    @Test
+    void singleHandlerWithoutNextDoesNotThrow() {
+        Order order = validOrder();
+        assertDoesNotThrow(() -> new InventoryCheckHandler().validate(order));
+    }
+}
+src/test/java/org/example/behavioral/payment/PaymentStrategyFactoryTest.java
+package org.example.behavioral.payment;
+ 
+import org.junit.jupiter.api.Test;
+ 
+import static org.junit.jupiter.api.Assertions.*;
+ 
+class PaymentStrategyFactoryTest {
+ 
+    @Test
+    void returnsCreditCardStrategyForCreditCard() {
+        PaymentStrategy strategy = PaymentStrategyFactory.get("CREDIT_CARD");
+        assertInstanceOf(CreditCardPayment.class, strategy);
+    }
+ 
+    @Test
+    void returnsPayPalStrategyForPaypalCaseInsensitive() {
+        PaymentStrategy strategy = PaymentStrategyFactory.get("paypal");
+        assertInstanceOf(PayPalPayment.class, strategy);
+    }
+ 
+    @Test
+    void throwsForUnsupportedMethod() {
+        assertThrows(IllegalArgumentException.class, () -> PaymentStrategyFactory.get("BITCOIN"));
+    }
+ 
+    @Test
+    void throwsForNullMethod() {
+        assertThrows(IllegalArgumentException.class, () -> PaymentStrategyFactory.get(null));
+    }
+ 
+    @Test
+    void isSupportedReflectsRegisteredMethods() {
+        assertTrue(PaymentStrategyFactory.isSupported("CREDIT_CARD"));
+        assertTrue(PaymentStrategyFactory.isSupported("paypal"));
+        assertFalse(PaymentStrategyFactory.isSupported("BITCOIN"));
+        assertFalse(PaymentStrategyFactory.isSupported(null));
+    }
+}
+src/test/java/org/example/behavioral/notification/NotificationServiceTest.java
+package org.example.behavioral.notification;
+ 
+import org.junit.jupiter.api.Test;
+ 
+import java.util.ArrayList;
+import java.util.List;
+ 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+ 
+class NotificationServiceTest {
+ 
+    /** Test double recording every message it receives. */
+    private static class RecordingObserver implements Observer {
+        final List<String> received = new ArrayList<>();
+ 
+        @Override
+        public void update(String message) {
+            received.add(message);
+        }
+    }
+ 
+    @Test
+    void notifiesAllObserversRegisteredAtConstruction() {
+        RecordingObserver email = new RecordingObserver();
+        RecordingObserver sms = new RecordingObserver();
+        NotificationService service = new NotificationService(List.of(email, sms));
+ 
+        service.notifyObservers("Order 1 has been placed.");
+ 
+        assertEquals(List.of("Order 1 has been placed."), email.received);
+        assertEquals(List.of("Order 1 has been placed."), sms.received);
+    }
+ 
+    @Test
+    void newlyAddedObserverReceivesSubsequentNotifications() {
+        NotificationService service = new NotificationService(List.of());
+        RecordingObserver observer = new RecordingObserver();
+ 
+        service.addObserver(observer);
+        service.notifyObservers("Order 2 status changed.");
+ 
+        assertTrue(observer.received.contains("Order 2 status changed."));
+    }
+ 
+    @Test
+    void noObserversMeansNoErrors() {
+        NotificationService service = new NotificationService(List.of());
+        service.notifyObservers("No one is listening.");
+        // No exception = pass.
+    }
+}
+src/test/java/org/example/behavioral/command/PlaceOrderCommandTest.java
+package org.example.behavioral.command;
+ 
+import org.example.behavioral.entity.Order;
+import org.junit.jupiter.api.Test;
+ 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+ 
+class PlaceOrderCommandTest {
+ 
+    @Test
+    void executeSetsStatusToPlaced() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setCustomerName("Bob");
+        order.setStatus(Order.STATUS_PENDING);
+ 
+        OrderCommand command = new PlaceOrderCommand(order);
+        command.execute();
+ 
+        assertEquals(Order.STATUS_PLACED, order.getStatus());
+    }
+}
+src/test/java/org/example/behavioral/service/OrderServiceTest.java
+package org.example.behavioral.service;
+ 
+import org.example.behavioral.entity.Order;
+import org.example.behavioral.exception.OrderValidationException;
+import org.example.behavioral.notification.NotificationService;
+import org.example.behavioral.repository.OrderRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+ 
+import java.util.NoSuchElementException;
+import java.util.Optional;
+ 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+ 
+@ExtendWith(MockitoExtension.class)
+class OrderServiceTest {
+ 
+    @Mock
+    private OrderRepository orderRepository;
+ 
+    @Mock
+    private NotificationService notificationService;
+ 
+    private OrderService orderService;
+ 
+    @BeforeEach
+    void setUp() {
+        orderService = new OrderService(orderRepository, notificationService);
+    }
+ 
+    private Order validOrder() {
+        Order order = new Order();
+        order.setCustomerName("Carol");
+        order.setTotalAmount(200.0);
+        order.setPaymentMethod("CREDIT_CARD");
+        order.setStatus(Order.STATUS_PENDING);
+        return order;
+    }
+ 
+    @Test
+    void placeOrderSavesTwiceAndNotifiesObservers() {
+        Order order = validOrder();
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> {
+            Order arg = inv.getArgument(0);
+            arg.setId(42L);
+            return arg;
+        });
+ 
+        Order result = orderService.placeOrder(order);
+ 
+        assertEquals(42L, result.getId());
+        assertEquals(Order.STATUS_PLACED, result.getStatus());
+        verify(orderRepository, times(2)).save(any(Order.class));
+        verify(notificationService).notifyObservers(contains("Order 42"));
+    }
+ 
+    @Test
+    void placeOrderRejectsInvalidPaymentMethodBeforeSaving() {
+        Order order = validOrder();
+        order.setPaymentMethod("BITCOIN");
+ 
+        assertThrows(OrderValidationException.class, () -> orderService.placeOrder(order));
+ 
+        verify(orderRepository, never()).save(any(Order.class));
+        verify(notificationService, never()).notifyObservers(any());
+        assertEquals(Order.STATUS_REJECTED, order.getStatus());
+    }
+ 
+    @Test
+    void updateStatusNotifiesObserversWithNewStatus() {
+        Order existing = validOrder();
+        existing.setId(7L);
+        existing.setStatus(Order.STATUS_PLACED);
+ 
+        when(orderRepository.findById(7L)).thenReturn(Optional.of(existing));
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+ 
+        Order updated = orderService.updateStatus(7L, Order.STATUS_SHIPPED);
+ 
+        assertEquals(Order.STATUS_SHIPPED, updated.getStatus());
+        verify(notificationService).notifyObservers(contains("SHIPPED"));
+    }
+ 
+    @Test
+    void updateStatusThrowsWhenOrderMissing() {
+        when(orderRepository.findById(99L)).thenReturn(Optional.empty());
+ 
+        assertThrows(NoSuchElementException.class, () -> orderService.updateStatus(99L, "SHIPPED"));
+    }
+ 
+    @Test
+    void getOrderByIdThrowsWhenMissing() {
+        when(orderRepository.findById(1L)).thenReturn(Optional.empty());
+ 
+        assertThrows(NoSuchElementException.class, () -> orderService.getOrderById(1L));
+    }
+ 
+    @Test
+    void deleteOrderThrowsWhenMissing() {
+        when(orderRepository.existsById(5L)).thenReturn(false);
+ 
+        assertThrows(NoSuchElementException.class, () -> orderService.deleteOrder(5L));
+        verify(orderRepository, never()).deleteById(any());
+    }
+ 
+    @Test
+    void deleteOrderDelegatesToRepositoryWhenPresent() {
+        when(orderRepository.existsById(5L)).thenReturn(true);
+ 
+        orderService.deleteOrder(5L);
+ 
+        verify(orderRepository).deleteById(5L);
+    }
+}
